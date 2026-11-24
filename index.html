@@ -104,6 +104,38 @@ footer a{color:#fff}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
+
+.acts{display:flex;gap:10px;align-items:center}
+.btn{border:0;cursor:pointer;font:inherit;font-weight:600}
+.btn.sm{padding:9px 16px;border-radius:10px;font-size:.92rem;box-shadow:none}
+.btn.ghost{background:#fff;color:var(--blue);border:1.5px solid var(--blue)}
+.btn[hidden],[hidden]{display:none!important}
+.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:0 26px 14px}
+#crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:.95rem}
+#crumbs button{background:none;border:0;font:inherit;color:var(--blue);cursor:pointer;padding:4px 6px;border-radius:6px;font-weight:600}
+#crumbs button:hover{background:#e8eff9}
+#crumbs span{color:var(--muted)}
+#tools{display:flex;gap:10px}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;align-items:center;gap:14px;padding:12px 26px;border-bottom:1px solid #edf1f6;transition:background .15s}
+.list li:hover{background:#f5f8fc}
+.ic{flex:none;font-size:1.5rem;width:34px;text-align:center}
+.nm{flex:1;min-width:0;background:none;border:0;font:inherit;font-weight:500;color:var(--ink);text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm:hover{color:var(--blue)}
+.meta{flex:none;color:var(--muted);font-size:.85rem;white-space:nowrap}
+.ra{display:flex;gap:4px;flex:none}
+.ra a,.ra button{background:none;border:0;cursor:pointer;font-size:1.05rem;padding:6px 8px;border-radius:8px;text-decoration:none;color:inherit}
+.ra a:hover,.ra button:hover{background:#e3ebf6}
+.empty{padding:48px 24px;text-align:center;color:var(--muted)}
+.drop{outline:3px dashed var(--blue);outline-offset:-10px;background:#eef4fc}
+dialog{border:0;border-radius:16px;padding:24px;width:min(400px,92vw);box-shadow:0 30px 80px -20px rgba(0,0,0,.5)}
+dialog::backdrop{background:rgba(15,30,55,.55)}
+dialog h3{margin:0 0 14px;font:700 1.15rem var(--serif)}
+dialog input{width:100%;padding:11px 13px;font:inherit;border:1.5px solid var(--line);border-radius:10px;margin-bottom:16px}
+.dbtn{display:flex;gap:10px;justify-content:flex-end}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(30px);background:var(--navy);color:#fff;padding:12px 20px;border-radius:12px;opacity:0;transition:.3s;z-index:50;pointer-events:none;max-width:90vw}
+#toast.on{opacity:1;transform:translateX(-50%)}
+@media (max-width:640px){.meta{display:none}.list li{padding:12px 16px}.bar{padding:0 16px 14px}}
 </style>
 </head>
 <body>
@@ -125,17 +157,18 @@ footer a{color:#fff}
     <div class="head">
       <div>
         <h2>Документы колледжа</h2>
-        <p>Выберите файл, чтобы открыть или скачать его.</p>
+        <p id="hint">Выберите файл, чтобы открыть или скачать его.</p>
       </div>
-      <a class="btn" id="open" href="#" target="_blank" rel="noopener">Открыть в Google Диске
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </a>
+      <div class="acts"><button class="btn sm" id="login" hidden>Вход для сотрудников</button></div>
     </div>
-    <div class="frame" id="frame">
-      <div class="skeleton" id="skeleton">Загружаем список документов…</div>
-    </div>
-    <div class="foot-hint">Список не отображается? <a id="open2" href="#" target="_blank" rel="noopener">Откройте папку на Google Диске</a>.</div>
+    <div class="bar"><nav id="crumbs" aria-label="Путь"></nav>
+      <div id="tools" hidden><label class="btn sm">⬆ Загрузить файлы<input type="file" id="file" multiple hidden></label><button class="btn sm ghost" id="mk">＋ Новая папка</button></div></div>
+    <div class="frame" id="frame"><div class="skeleton" id="skeleton">Загружаем список документов…</div><ul class="list" id="list"></ul></div>
+    <div class="foot-hint">Что-то не работает? <a id="open2" href="#" target="_blank" rel="noopener">Откройте папку на Google Диске</a>.</div>
   </section>
+  <dialog id="dlg"><form method="dialog"><h3 id="dt"></h3><input id="di"><div class="dbtn"><button class="btn sm ghost" value="no">Отмена</button><button class="btn sm" value="ok" id="dok">ОК</button></div></form></dialog>
+  <div id="toast" role="status"></div>
+
 </main>
 
 <footer>
@@ -146,24 +179,80 @@ footer a{color:#fff}
 </footer>
 
 <script>
-/* ===== НАСТРОЙКА: ID папки Google Диска ===== */
+/* ===== НАСТРОЙКА ===== */
 var FOLDER_ID = "1u3Jpc44Vc8fDrC29EwW9lTmUuLgSOOc0";
-/* ============================================ */
+var CLIENT_ID = "";   /* OAuth Client ID из Google Cloud */
+var API_KEY   = "";   /* API key из Google Cloud */
+/* ===================== */
 (function(){
-  var frame=document.getElementById('frame'),sk=document.getElementById('skeleton');
-  var links=[document.getElementById('open'),document.getElementById('open2')];
-  if(!FOLDER_ID){
-    frame.innerHTML='<div class="notice">Хранилище ещё не подключено. Укажите ID папки Google Диска в начале скрипта.</div>';
-    links.forEach(function(a){a.style.display='none'});
-    return;
-  }
-  var id=encodeURIComponent(FOLDER_ID);
-  links.forEach(function(a){a.href='https://drive.google.com/drive/folders/'+id});
-  var f=document.createElement('iframe');
-  f.title='Документы колледжа';
-  f.src='https://drive.google.com/embeddedfolderview?id='+id+'#list';
-  f.addEventListener('load',function(){sk.style.display='none'});
-  frame.appendChild(f);
+var $=function(i){return document.getElementById(i)};
+var FOLDER='application/vnd.google-apps.folder',API='https://www.googleapis.com/drive/v3/files';
+$('open2').href='https://drive.google.com/drive/folders/'+encodeURIComponent(FOLDER_ID);
+if(!CLIENT_ID||!API_KEY){ /* запасной режим: просто просмотр */
+  var f=document.createElement('iframe');f.title='Документы';f.style.cssText='display:block;width:100%;height:560px;border:0;position:relative;z-index:1';
+  f.src='https://drive.google.com/embeddedfolderview?id='+encodeURIComponent(FOLDER_ID)+'#list';
+  f.onload=function(){$('skeleton').style.display='none'};$('frame').appendChild(f);$('crumbs').style.display='none';return;
+}
+var token=null,tc,stack=[{id:FOLDER_ID,name:'Документы'}],edit=false,busy=false;
+function h(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function toast(m){var t=$('toast');t.textContent=m;t.className='on';clearTimeout(toast.k);toast.k=setTimeout(function(){t.className=''},3500)}
+function cur(){return stack[stack.length-1]}
+function size(n){n=+n;if(!n)return'';return n<1048576?Math.round(n/1024)+' КБ':(n/1048576).toFixed(1)+' МБ'}
+async function api(url,o){o=o||{};o.headers=o.headers||{};
+  if(token)o.headers.Authorization='Bearer '+token;else url+=(url.indexOf('?')>-1?'&':'?')+'key='+API_KEY;
+  var r=await fetch(url,o);
+  if(r.status===401&&token){token=null;setAuth();throw new Error('Сессия истекла. Войдите снова.')}
+  if(!r.ok){var m='Ошибка '+r.status;try{m=(await r.json()).error.message||m}catch(e){}throw new Error(m)}
+  return r.status===204?null:r.json()}
+function ask(title,val,input,ok){return new Promise(function(res){var d=$('dlg'),i=$('di');
+  $('dt').textContent=title;i.hidden=!input;i.value=val||'';$('dok').textContent=ok||'ОК';d.returnValue='';
+  d.onclose=function(){res(d.returnValue==='ok'?(input?i.value.trim():true):null)};d.showModal();if(input){i.focus();i.select()}})}
+async function load(){
+  $('skeleton').style.display='flex';var ul=$('list');
+  try{
+    var c=cur(),q=encodeURIComponent("'"+c.id+"' in parents and trashed=false");
+    var d=await api(API+'?q='+q+'&pageSize=200&orderBy=folder,name&fields='+encodeURIComponent('files(id,name,mimeType,size,modifiedTime,capabilities(canRename,canTrash))'));
+    edit=false;
+    if(token){try{edit=!!(await api(API+'/'+c.id+'?fields=capabilities(canAddChildren)')).capabilities.canAddChildren}catch(e){}}
+    $('tools').hidden=!edit;
+    $('hint').textContent=token?(edit?'Вы можете загружать файлы и управлять папками.':'У вашего аккаунта нет прав на изменение: доступен только просмотр.'):'Выберите файл, чтобы открыть или скачать его.';
+    ul.textContent='';
+    if(!d.files.length)ul.appendChild(h('li','empty','Здесь пока пусто.'));
+    d.files.forEach(function(x){var isF=x.mimeType===FOLDER,cp=x.capabilities||{},li=h('li');
+      li.appendChild(h('span','ic',isF?'📁':'📄'));
+      var nm=h('button','nm',x.name);nm.title=x.name;
+      nm.onclick=function(){if(isF){stack.push({id:x.id,name:x.name});load()}else window.open('https://drive.google.com/file/d/'+x.id+'/view','_blank','noopener')};
+      li.appendChild(nm);
+      li.appendChild(h('span','meta',isF?'':size(x.size)));
+      var ra=h('div','ra');
+      if(!isF){var a=h('a','',"⬇");a.href='https://drive.google.com/uc?export=download&id='+x.id;a.title='Скачать';a.target='_blank';a.rel='noopener';ra.appendChild(a)}
+      if(edit&&cp.canRename){var b=h('button','','✏️');b.title='Переименовать';b.onclick=async function(){var n=await ask(isF?'Переименовать папку':'Переименовать файл',x.name,true,'Сохранить');if(n&&n!==x.name)act(function(){return api(API+'/'+x.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})})},'Переименовано')};ra.appendChild(b)}
+      if(edit&&cp.canTrash){var t=h('button','','🗑');t.title='Удалить';t.onclick=async function(){if(await ask('Удалить «'+x.name+'»?'+(isF?' Вместе со всем содержимым.':''),'',false,'Удалить'))act(function(){return api(API+'/'+x.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})})},'Перемещено в корзину Google Диска')};ra.appendChild(t)}
+      li.appendChild(ra);ul.appendChild(li)});
+  }catch(e){ul.textContent='';ul.appendChild(h('li','empty','Не удалось загрузить список: '+e.message))}
+  $('skeleton').style.display='none';crumbs()}
+function crumbs(){var n=$('crumbs');n.textContent='';stack.forEach(function(s,i){
+  if(i)n.appendChild(h('span','','›'));var b=h('button','',s.name);
+  b.onclick=function(){stack=stack.slice(0,i+1);load()};n.appendChild(b)})}
+async function act(fn,ok){try{await fn();toast(ok)}catch(e){toast(e.message)}load()}
+async function upload(files){if(!edit||busy)return;busy=true;var n=0;
+  for(var i=0;i<files.length;i++){var f=files[i];toast('Загружаем '+(i+1)+' из '+files.length+': '+f.name);
+    try{var bd='b'+Date.now()+i,meta=JSON.stringify({name:f.name,parents:[cur().id]});
+      var body=new Blob(['--'+bd+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+meta+'\r\n--'+bd+'\r\nContent-Type: '+(f.type||'application/octet-stream')+'\r\n\r\n',f,'\r\n--'+bd+'--']);
+      await api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+bd},body:body});n++}
+    catch(e){toast('«'+f.name+'»: '+e.message);await new Promise(function(r){setTimeout(r,2500)})}}
+  busy=false;if(n)toast('Загружено файлов: '+n);load()}
+$('file').onchange=function(e){upload(e.target.files);e.target.value=''};
+$('mk').onclick=async function(){var n=await ask('Новая папка','',true,'Создать');if(n)act(function(){return api(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,mimeType:FOLDER,parents:[cur().id]})})},'Папка создана')};
+var fr=$('frame');['dragover','dragleave','drop'].forEach(function(ev){fr.addEventListener(ev,function(e){
+  if(!edit)return;e.preventDefault();fr.classList.toggle('drop',ev==='dragover');if(ev==='drop')upload(e.dataTransfer.files)})});
+function setAuth(){var b=$('login');b.hidden=false;b.textContent=token?'Выйти':'Вход для сотрудников';b.className=token?'btn sm ghost':'btn sm'}
+$('login').onclick=function(){if(token){try{google.accounts.oauth2.revoke(token)}catch(e){}token=null;setAuth();load()}else if(tc)tc.requestAccessToken({prompt:''});else toast('Google ещё загружается, попробуйте через секунду')};
+var sc=document.createElement('script');sc.src='https://accounts.google.com/gsi/client';sc.async=true;
+sc.onload=function(){tc=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:'https://www.googleapis.com/auth/drive',
+  callback:function(r){if(r&&r.access_token){token=r.access_token;setAuth();load()}else toast('Не удалось войти в Google')}});setAuth()};
+sc.onerror=function(){toast('Не удалось загрузить вход Google')};document.head.appendChild(sc);
+load();
 })();
 </script>
 </body>
