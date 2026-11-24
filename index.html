@@ -140,6 +140,17 @@ dialog input{width:100%;padding:11px 13px;font:inherit;border:1.5px solid var(--
 .lb{display:block;font-size:.9rem;color:var(--muted);margin-bottom:12px}
 .lb input{margin:4px 0 0}
 .us{min-height:1.4em;font-size:.92rem;margin:0 0 14px;color:var(--ink)}
+
+.pg{margin:0 0 14px}
+.pgtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+.pgtop b{font:700 1.7rem var(--serif);color:var(--blue)}
+.pgtop span{font-size:.84rem;color:var(--muted);text-align:right}
+.track{height:14px;border-radius:99px;background:#e6edf6;overflow:hidden}
+.fill{position:relative;height:100%;width:0;border-radius:99px;background:var(--spectrum);transition:width .35s ease;overflow:hidden}
+.fill::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(115deg,rgba(255,255,255,.3) 0 12px,transparent 12px 24px);background-size:34px 100%;animation:stripes .8s linear infinite}
+.fill.done::after{animation:none;opacity:0}
+@keyframes stripes{to{background-position:34px 0}}
+.pn{font-size:.82rem;color:var(--muted);margin:8px 0 0;word-break:break-word}
 </style>
 </head>
 <body>
@@ -171,7 +182,8 @@ dialog input{width:100%;padding:11px 13px;font:inherit;border:1.5px solid var(--
   <dialog id="dlg"><form id="uf"><h3>Загрузить документ</h3>
     <label class="lb">Ваше имя и группа (по желанию)<input id="an" maxlength="60"></label>
     <label class="lb" id="cl" hidden>Код доступа<input id="ac"></label>
-    <label class="lb">Файлы (до 20 МБ каждый)<input type="file" id="af" multiple></label>
+    <label class="lb">Файлы (до <span id="lm"></span> МБ каждый)<input type="file" id="af" multiple></label>
+    <div class="pg" id="pg" hidden><div class="pgtop"><b id="pp">0%</b><span id="pi"></span></div><div class="track"><div class="fill" id="pf"></div></div><p class="pn" id="pn"></p></div>
     <p class="us" id="us" role="status"></p>
     <div class="dbtn"><button type="button" class="btn sm ghost" id="uc">Закрыть</button><button type="submit" class="btn sm" id="ug">Отправить</button></div>
   </form></dialog>
@@ -193,10 +205,10 @@ dialog input{width:100%;padding:11px 13px;font:inherit;border:1.5px solid var(--
 var FOLDER_ID  = "1u3Jpc44Vc8fDrC29EwW9lTmUuLgSOOc0";
 var UPLOAD_URL = "https://script.google.com/macros/s/AKfycbyZojfIQSIpCk-PA1AsyrY86Ch8mLZ8LT96nLwzjkQX6MqAXbxpiYMg8-2jpVMjc40x/exec";     /* адрес веб-приложения Apps Script (заканчивается на /exec) */
 var NEED_CODE  = false;  /* true, если в скрипте задан код доступа */
-var MAX_MB     = 20;
+var MAX_MB     = 500;    /* должно совпадать со значением в скрипте */
 /* ===================== */
 (function(){
-var $=function(i){return document.getElementById(i)};
+var $=function(i){return document.getElementById(i)},CHUNK=8*1024*1024,busy=false;
 var id=encodeURIComponent(FOLDER_ID);
 $('open2').href='https://drive.google.com/drive/folders/'+id;
 var f=document.createElement('iframe');f.title='Документы колледжа';
@@ -204,23 +216,47 @@ f.style.cssText='display:block;width:100%;height:560px;border:0;position:relativ
 f.src='https://drive.google.com/embeddedfolderview?id='+id+'#list';
 f.onload=function(){$('skeleton').style.display='none'};$('frame').appendChild(f);
 if(!UPLOAD_URL){$('up').hidden=true;return}
-$('cl').hidden=!NEED_CODE;
-$('up').onclick=function(){$('us').textContent='';$('dlg').showModal()};
+$('lm').textContent=MAX_MB;$('cl').hidden=!NEED_CODE;
+$('up').onclick=function(){if(!busy)$('us').textContent='';$('dlg').showModal()};
 $('uc').onclick=function(){$('dlg').close()};
-function b64(file){return new Promise(function(ok,no){var r=new FileReader();r.onload=function(){ok(String(r.result).split(',')[1])};r.onerror=no;r.readAsDataURL(file)})}
-$('uf').onsubmit=async function(e){
-  e.preventDefault();var fs=$('af').files,st=$('us'),g=$('ug'),ok=0,err='';
+$('dlg').addEventListener('cancel',function(e){if(busy)e.preventDefault()});
+window.addEventListener('beforeunload',function(e){if(busy){e.preventDefault();e.returnValue=''}});
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function b64(blob){return new Promise(function(ok,no){var r=new FileReader();r.onload=function(){ok(String(r.result).split(',')[1])};r.onerror=no;r.readAsDataURL(blob)})}
+function post(obj,onUp){return new Promise(function(ok,no){var x=new XMLHttpRequest();x.open('POST',UPLOAD_URL);x.timeout=180000;
+  x.upload.onprogress=function(e){if(onUp&&e.lengthComputable)onUp(e.loaded/e.total)};
+  x.onload=function(){try{ok(JSON.parse(x.responseText))}catch(e){no(new Error('некорректный ответ сервера'))}};
+  x.onerror=function(){no(new Error('нет связи'))};x.ontimeout=function(){no(new Error('превышено время ожидания'))};
+  x.send(JSON.stringify(obj))})}
+function fmt(s){s=Math.round(s);var m=Math.floor(s/60);return m?m+' мин '+(s%60)+' с':s+' с'}
+function mb(n){return (n/1048576).toFixed(n<10485760?1:0)}
+function setP(total,sent,t0){var p=Math.min(100,Math.floor(sent/total*100)),el=(Date.now()-t0)/1000;
+  $('pf').style.width=p+'%';$('pp').textContent=p+'%';
+  $('pi').textContent=mb(sent)+' из '+mb(total)+' МБ'+(p>=2&&p<100?' · осталось ~'+fmt(el*(100-p)/p):'')}
+async function send(fl,author,code){
+  var t0=Date.now(),r=await post({action:'init',name:fl.name,type:fl.type,size:fl.size,author:author,code:code});
+  if(!r.ok)throw new Error(r.error||'ошибка');
+  for(var s=0;s<fl.size;s+=CHUNK){var e=Math.min(s+CHUNK,fl.size),len=e-s,data=await b64(fl.slice(s,e)),done=false;
+    for(var a=0;a<3&&!done;a++){
+      try{var c=await post({action:'chunk',url:r.url,start:s,total:fl.size,data:data},function(q){setP(fl.size,s+len*q*0.9,t0)});
+        if(!c.ok)throw new Error(c.error||'ошибка');done=true}
+      catch(x){if(a===2)throw x;await sleep(1500*(a+1))}}
+    setP(fl.size,e,t0)}
+}
+$('uf').onsubmit=async function(ev){
+  ev.preventDefault();var fs=$('af').files,st=$('us'),g=$('ug'),pg=$('pg'),ok=0,err='';
   if(!fs.length){st.textContent='Выберите файл.';return}
-  g.disabled=true;
+  g.disabled=true;$('uc').disabled=true;busy=true;st.textContent='';
   for(var i=0;i<fs.length;i++){var fl=fs[i];
-    if(fl.size>MAX_MB*1048576){err='«'+fl.name+'» больше '+MAX_MB+' МБ. ';continue}
-    st.textContent='Отправляем '+(i+1)+' из '+fs.length+': '+fl.name+'…';
-    try{
-      var r=await fetch(UPLOAD_URL,{method:'POST',body:JSON.stringify({name:fl.name,type:fl.type,author:$('an').value.trim(),code:$('ac').value,data:await b64(fl)})});
-      var j=await r.json();if(j.ok)ok++;else err='«'+fl.name+'»: '+(j.error||'ошибка')+'. ';
-    }catch(x){err='Не удалось отправить «'+fl.name+'». Проверьте интернет. '}
+    if(!fl.size){err+='«'+fl.name+'» пустой. ';continue}
+    if(fl.size>MAX_MB*1048576){err+='«'+fl.name+'» больше '+MAX_MB+' МБ. ';continue}
+    pg.hidden=false;$('pf').classList.remove('done');setP(fl.size,0,Date.now());
+    $('pn').textContent=(fs.length>1?'Файл '+(i+1)+' из '+fs.length+': ':'')+fl.name+'. Не закрывайте страницу до конца загрузки.';
+    try{await send(fl,$('an').value.trim(),$('ac').value);ok++;$('pf').classList.add('done');$('pp').textContent='100%'}
+    catch(x){err+='«'+fl.name+'»: '+x.message+'. '}
   }
-  g.disabled=false;st.textContent=(ok?'Загружено файлов: '+ok+'. ':'')+err;
+  busy=false;g.disabled=false;$('uc').disabled=false;
+  st.textContent=(ok?'✓ Загружено файлов: '+ok+'. ':'')+err;
   if(ok){$('af').value='';setTimeout(function(){f.src=f.src},1500)}
 };
 })();
