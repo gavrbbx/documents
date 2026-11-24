@@ -203,12 +203,12 @@ dialog input{width:100%;padding:11px 13px;font:inherit;border:1.5px solid var(--
 <script>
 /* ===== НАСТРОЙКА ===== */
 var FOLDER_ID  = "1u3Jpc44Vc8fDrC29EwW9lTmUuLgSOOc0";
-var UPLOAD_URL = "https://script.google.com/macros/s/AKfycbyZojfIQSIpCk-PA1AsyrY86Ch8mLZ8LT96nLwzjkQX6MqAXbxpiYMg8-2jpVMjc40x/exec";     /* адрес веб-приложения Apps Script (заканчивается на /exec) */
+var UPLOAD_URL = "";     /* адрес веб-приложения Apps Script (заканчивается на /exec) */
 var NEED_CODE  = false;  /* true, если в скрипте задан код доступа */
 var MAX_MB     = 500;    /* должно совпадать со значением в скрипте */
 /* ===================== */
 (function(){
-var $=function(i){return document.getElementById(i)},CHUNK=8*1024*1024,busy=false;
+var $=function(i){return document.getElementById(i)},CHUNK=5*1024*1024,busy=false;
 var id=encodeURIComponent(FOLDER_ID);
 $('open2').href='https://drive.google.com/drive/folders/'+id;
 var f=document.createElement('iframe');f.title='Документы колледжа';
@@ -223,25 +223,27 @@ $('dlg').addEventListener('cancel',function(e){if(busy)e.preventDefault()});
 window.addEventListener('beforeunload',function(e){if(busy){e.preventDefault();e.returnValue=''}});
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 function b64(blob){return new Promise(function(ok,no){var r=new FileReader();r.onload=function(){ok(String(r.result).split(',')[1])};r.onerror=no;r.readAsDataURL(blob)})}
-function post(obj,onUp){return new Promise(function(ok,no){var x=new XMLHttpRequest();x.open('POST',UPLOAD_URL);x.timeout=180000;
-  x.upload.onprogress=function(e){if(onUp&&e.lengthComputable)onUp(e.loaded/e.total)};
-  x.onload=function(){try{ok(JSON.parse(x.responseText))}catch(e){no(new Error('некорректный ответ сервера'))}};
-  x.onerror=function(){no(new Error('нет связи'))};x.ontimeout=function(){no(new Error('превышено время ожидания'))};
-  x.send(JSON.stringify(obj))})}
+function post(obj){var ac=new AbortController(),t=setTimeout(function(){ac.abort()},180000);
+  return fetch(UPLOAD_URL,{method:'POST',body:JSON.stringify(obj),signal:ac.signal})
+    .then(function(r){return r.json().catch(function(){throw new Error('некорректный ответ сервера')})},
+          function(e){throw new Error(e.name==='AbortError'?'превышено время ожидания':'нет связи с сервером')})
+    .finally(function(){clearTimeout(t)})}
 function fmt(s){s=Math.round(s);var m=Math.floor(s/60);return m?m+' мин '+(s%60)+' с':s+' с'}
 function mb(n){return (n/1048576).toFixed(n<10485760?1:0)}
 function setP(total,sent,t0){var p=Math.min(100,Math.floor(sent/total*100)),el=(Date.now()-t0)/1000;
   $('pf').style.width=p+'%';$('pp').textContent=p+'%';
   $('pi').textContent=mb(sent)+' из '+mb(total)+' МБ'+(p>=2&&p<100?' · осталось ~'+fmt(el*(100-p)/p):'')}
 async function send(fl,author,code){
-  var t0=Date.now(),r=await post({action:'init',name:fl.name,type:fl.type,size:fl.size,author:author,code:code});
+  var t0=Date.now(),avg=null,r=await post({action:'init',name:fl.name,type:fl.type,size:fl.size,author:author,code:code});
   if(!r.ok)throw new Error(r.error||'ошибка');
-  for(var s=0;s<fl.size;s+=CHUNK){var e=Math.min(s+CHUNK,fl.size),len=e-s,data=await b64(fl.slice(s,e)),done=false;
-    for(var a=0;a<3&&!done;a++){
-      try{var c=await post({action:'chunk',url:r.url,start:s,total:fl.size,data:data},function(q){setP(fl.size,s+len*q*0.9,t0)});
+  for(var s=0;s<fl.size;s+=CHUNK){var e=Math.min(s+CHUNK,fl.size),len=e-s,data=await b64(fl.slice(s,e)),done=false,c0=Date.now();
+    var tm=setInterval(function(){setP(fl.size,s+len*Math.min(.95,(Date.now()-c0)/(avg||6000)),t0)},250);
+    try{for(var a=0;a<3&&!done;a++){
+      try{var c=await post({action:'chunk',url:r.url,start:s,total:fl.size,data:data});
         if(!c.ok)throw new Error(c.error||'ошибка');done=true}
-      catch(x){if(a===2)throw x;await sleep(1500*(a+1))}}
-    setP(fl.size,e,t0)}
+      catch(x){if(a===2)throw x;await sleep(1500*(a+1))}}}
+    finally{clearInterval(tm)}
+    var dt=Date.now()-c0;avg=avg?avg*.6+dt*.4:dt;setP(fl.size,e,t0)}
 }
 $('uf').onsubmit=async function(ev){
   ev.preventDefault();var fs=$('af').files,st=$('us'),g=$('ug'),pg=$('pg'),ok=0,err='';
